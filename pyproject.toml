@@ -1,0 +1,9 @@
+[project]
+name = "async-pixiv-api"
+version = "0.0.1"
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp[speedups]>=3.13.5",
+    "pydantic-settings>=2.14.0",
+    "pydantic[email,timezone]>=2.13.3",
+]
