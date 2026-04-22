@@ -3,12 +3,12 @@ import time
 from pyrate_limiter import Duration, Limiter, Rate
 from pyrate_limiter.limiter_factory import create_inmemory_limiter
 
-from pixiv._utils.net import PixivClientSession
+from pixiv._utils.net import PixivRequestClient
 
 
 async def main():
-    session = PixivClientSession(
-        limiter=create_inmemory_limiter(
+    session = PixivRequestClient(
+        rate_limiter=create_inmemory_limiter(
             rate_per_duration=100,
             duration=Duration.SECOND,
         )

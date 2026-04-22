@@ -1,7 +1,10 @@
+import dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ("PixivSettings", "PixivRateLimitSettings", "PixivAPIHeadersSettings")
+
+dotenv.load_dotenv()
 
 
 class PixivRateLimitSettings(BaseSettings):

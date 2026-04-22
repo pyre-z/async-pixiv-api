@@ -1,48 +1,56 @@
 import asyncio
+import logging
 import re
-import socket
-from functools import lru_cache
+import ssl
 from threading import RLock
-from typing import Any
+from typing import Any, Iterable, Self
 
-from aiohttp import ClientResponse as ClientResponse
-from aiohttp import ClientSession, ClientTimeout
-from aiohttp.abc import AbstractResolver, ResolveResult
+from aiocache import cached
+from httpx import (
+    USE_CLIENT_DEFAULT,
+    AsyncBaseTransport,
+    AsyncClient,
+    AsyncHTTPTransport,
+    HTTPStatusError,
+    Limits,
+    Proxy,
+    Request,
+)
+from httpx import Response as _Response
+from httpx._client import UseClientDefault
+from httpx._config import DEFAULT_LIMITS
+from httpx._transports.default import SOCKET_OPTION
+from httpx._types import AuthTypes, CertTypes, ProxyTypes
 from pyrate_limiter import Limiter
 
 try:
-    import ujson as json  # ty:ignore[unresolved-import]
+    import ujson as json
 except ImportError:
     import json
 
-__all__ = (
-    "PixivClientSession",
-    "ByPassResolver",
-)
+__all__ = ("PixivRequestClient",)
+
+logger = logging.getLogger(__name__)
 
 
-class ByPassResolver(AbstractResolver):
-    """DNS-over-HTTPS (DoH) resolver for bypassing censorship.
-
-    Uses Cloudflare/Google public DoH endpoints to resolve DNS queries,
-    with support for forcing certain hosts through the resolver.
-    """
-
+class AsyncByPassHTTPTransport(AsyncHTTPTransport):
     # Public DoH endpoints (Cloudflare primary, with fallbacks)
-    DEFAULT_ENDPOINTS: list[str] = [
+    DEFAULT_ENDPOINTS = [
         "https://cloudflare-dns.com/dns-query",
         "https://1.1.1.1/dns-query",
         "https://1.0.0.1/dns-query",
+        "https://[2606:4700:4700::1001]/dns-query",
+        "https://[2606:4700:4700::1111]/dns-query",
     ]
 
     # Hosts that should be resolved through DoH (circumventing ISP blocking)
-    BYPASS_HOSTS: frozenset[str] = frozenset(
+    BYPASS_HOSTS = frozenset(
         {
             "app-api.pixiv.net",
             "public-api.secure.pixiv.net",
             "www.pixiv.net",
             "oauth.secure.pixiv.net",
-        }
+        },
     )
 
     # Regex pattern for validating IPv4 addresses
@@ -52,177 +60,275 @@ class ByPassResolver(AbstractResolver):
     )
 
     _lock: RLock = RLock()
-    _session: ClientSession | None = None
+    _request_client: "PixivRequestClient | None" = None
+    _proxy: ProxyTypes | None = None
 
     @property
-    def session(self) -> ClientSession:
-        if self._session is None or self._session.closed:
+    def request_client(self) -> "PixivRequestClient":
+        if self._request_client is None:
             with self._lock:
-                if self._session is None or self._session.closed:
-                    self._session = ClientSession(
+                if self._request_client is None:
+                    self._request_client = PixivRequestClient(
                         headers={"accept": "application/dns-json"},
-                        json_serialize=json.dumps,
+                        proxy=self._proxy,
                     )
-        return self._session
+        return self._request_client
 
+    # noinspection PyUnusedLocal
     def __init__(
         self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+        proxy: ProxyTypes | None = None,
+        uds: str | None = None,
+        local_address: str | None = None,
+        retries: int = 0,
+        socket_options: Iterable[SOCKET_OPTION] | None = None,
         endpoints: list[str] | None = None,
-        force_hosts: bool = True,
+        force_hosts: bool = False,
     ) -> None:
-        self.endpoints: list[str] = (
-            endpoints if endpoints is not None else self.DEFAULT_ENDPOINTS
+        # Disable cert verification for bypass mode (SNI mismatch issue with DoH IPs)
+        # We only do DoH resolution when not using a proxy to avoid SNI issues
+        super().__init__(
+            False,
+            cert,
+            trust_env,
+            http1,
+            http2,
+            limits,
+            proxy,
+            uds,
+            local_address,
+            retries,
+            socket_options,
         )
-        self.force_hosts: bool = force_hosts
+        self._proxy = proxy
+        self.endpoints = endpoints or self.DEFAULT_ENDPOINTS
+        self.force_hosts = force_hosts
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__} of {id(self):#x}"
+    async def query_endpoint(self, endpoint: str, host: str) -> str | None:
+        """Query DoH endpoints in parallel, first successful result wins"""
+        try:
+            # Build DoH URL with query parameters
+            url = f"{endpoint}?name={host}&type=A"
+            response = await self.request_client.get(url)
+            response.raise_for_status()
+            data = response.json()
 
-    @lru_cache
-    async def resolve(
-        self,
-        host: str,
-        port: int = 0,
-        family: socket.AddressFamily = socket.AF_INET,
-    ) -> list[ResolveResult]:
-        # Apply host mapping if needed (for bypassing censorship)
-        resolved_host = self._map_host(host) if self.force_hosts else host
+            # Parse dns-json response format
+            # Response schema: {"Status": 0, "Answer": [{"data": "1.2.3.4", ...}]}
+            if data.get("Status") != 0:
+                return None  # DNS query failed (NXDOMAIN, SERVFAIL, etc.)
 
-        # Launch parallel DNS queries to all endpoints
-        tasks = {
-            asyncio.create_task(self._resolve(endpoint, resolved_host, family))
-            for endpoint in self.endpoints
-        }
+            answers = data.get("Answer", [])
+            for answer in answers:
+                ip = answer.get("data", "")
+                if self._IPV4_PATTERN.match(ip):
+                    return ip
+            return None
+        except Exception:
+            return None
 
-        # Wait for first successful response
+    async def read_result(self, tasks: set[asyncio.Task]) -> list[str]:
+        result = []
+        if len(tasks) == 0:
+            return result
+
+        task = tasks.pop()
+        try:
+            await task
+            result.append(task.result())
+        except Exception as e:
+            logger.warning("caught:", repr(e))
+            result.extend(await self.read_result(tasks))
+        return result
+
+    @cached(30)
+    async def resolve(self, host: str) -> str | None:
+        """
+        Resolve hostname via DNS-over-HTTPS (DoH) using configured endpoints.
+
+        Only resolves hosts in BYPASS_HOSTS or when force_hosts is True.
+        Returns IPv4 address if resolution succeeds, None otherwise.
+        """
+        # Skip DoH when using proxy: proxy handles DNS, and avoids SNI issues
+        if self._proxy is not None:
+            return None
+
+        # Skip resolution for non-bypass hosts unless force_hosts is enabled
+        if host not in self.BYPASS_HOSTS and not self.force_hosts:
+            return None
+
+        # Try all endpoints concurrently, return first valid result
         done, pending = await asyncio.wait(
-            tasks,
+            [
+                asyncio.create_task(self.query_endpoint(ep, host))
+                for ep in self.endpoints
+            ],
             return_when=asyncio.FIRST_COMPLETED,
         )
-
-        # Cancel remaining tasks and wait for cancellation to complete
+        results = await self.read_result(done.union(pending))
         for task in pending:
             task.cancel()
-        if pending:
-            await asyncio.wait(
-                pending, timeout=1.0
-            )  # Give cancelled tasks time to clean up
 
-        # Collect results from completed tasks
-        ips = await self._collect_results(done)
+        for result in results:
+            if isinstance(result, str) and result:
+                return result
 
-        if not ips:
-            raise OSError(f"DNS resolution failed for {host}")
+        return None
 
-        return [
-            {
-                "hostname": "",
-                "host": ip,
-                "port": port,
-                "family": family,
-                "proto": 0,
-                "flags": socket.AI_NUMERICHOST,
-            }
-            for ip in ips
-        ]
+    async def handle_async_request(self, request: Request) -> Response:
+        host = request.url.host
+        ip = await self.resolve(host)
+        if ip is not None:
+            # Replace URL host with resolved IP for socket connection
+            request.url = request.url.copy_with(host=ip)
+            # Keep Host header as original hostname for proper virtual hosting
+            request.headers.setdefault("Host", host)
+        return Response.from_httpx_response(await super().handle_async_request(request))
 
-    async def _collect_results(self, tasks: set[asyncio.Task[list[str]]]) -> list[str]:
-        """Collect successful DNS results from completed tasks."""
-        errors: list[Exception] = []
 
-        for task in tasks:
-            try:
-                result = await task
-                if result:  # Only return non-empty results
-                    return result
-            except asyncio.CancelledError:
-                break  # Task was canceled, skip
-            except Exception as e:
-                errors.append(e)
+class Response(_Response):
+    _lock: RLock = RLock()
 
-        # All tasks failed or returned empty
-        if errors:
-            # Raise the first error for debugging
-            raise errors[0]
-        return []
+    @classmethod
+    def from_httpx_response(cls, response: _Response) -> Self:
+        """
+        Convert a httpx Response to our custom Response subclass.
 
-    def _map_host(self, host: str) -> str:
-        """Map a host to its alternative domain if in bypass list."""
-        if host in self.BYPASS_HOSTS:
-            return "www.pixivision.net"
-        return host
+        This preserves all response data including status code, headers, content,
+        cookies, history, etc.
+        """
+        # Create new instance and copy all attributes via __dict__
+        self = cls.__new__(cls)
+        self.__dict__.update(response.__dict__)
+        return self
 
-    async def close(self) -> None:
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
+    def json(self, **kwargs: Any) -> Any:
+        """Parse response body as JSON, using ujson if available."""
+        if not hasattr(self, "_json"):
+            with self._lock:
+                if not hasattr(self, "_json"):
+                    setattr(self, "_json", json.loads(self.text, **kwargs))
+        return getattr(self, "_json")
 
-    def parse_result(self, data: dict[str, Any]) -> list[str]:
-        """Parse DoH JSON response and extract IP addresses."""
-        if "Answer" not in data:
-            return []
+    def raise_for_status(self) -> Self:
+        request = self._request
+        if request is None:
+            raise RuntimeError(
+                "Cannot call `raise_for_status` as the request "
+                "instance has not been set on this response."
+            )
 
-        return [
-            record["data"]
-            for record in data["Answer"]
-            if self._is_valid_ip(record["data"])
-        ]
+        if self.is_success:
+            return self
 
-    def _is_valid_ip(self, ip: str) -> bool:
-        """Check if string is a valid IPv4 address."""
-        return bool(self._IPV4_PATTERN.match(ip))
+        if self.has_redirect_location:
+            message = (
+                "{error_type} '{0.status_code} {0.reason_phrase}' for url '{0.url}'\n"
+                "Redirect location: '{0.headers[location]}'\n"
+                "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/{0.status_code}"
+            )
+        else:
+            message = (
+                "{error_type} '{0.status_code} {0.reason_phrase}' for url '{0.url}'\n"
+                "For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/{0.status_code}"
+            )
 
-    async def _resolve(
-        self,
-        endpoint: str,
-        hostname: str,
-        family: socket.AddressFamily,
-        timeout: float = 5.0,
-    ) -> list[str]:
-        """Perform DNS query against a single DoH endpoint."""
-        params = {
-            "name": hostname,
-            "type": "AAAA" if family == socket.AF_INET6 else "A",
-            "do": "false",
-            "cd": "false",
+        status_class = self.status_code // 100
+        error_types = {
+            1: "Informational response",
+            3: "Redirect response",
+            4: "Client error",
+            5: "Server error",
         }
+        error_type = error_types.get(status_class, "Invalid status code")
+        message = message.format(self, error_type=error_type)
+        raise HTTPStatusError(message, request=request, response=self)
 
-        async with self.session.get(
-            endpoint,
-            ssl=False,
-            params=params,
-            timeout=ClientTimeout(total=timeout),
-        ) as response:
-            if response.status != 200:
-                raise OSError(
-                    f"DoH query failed for {hostname} via {endpoint}: "
-                    f"HTTP {response.status}"
-                )
-
-            data = await response.json(content_type="application/dns-json")
-            if data.get("Status") != 0:
-                raise OSError(
-                    f"DoH query returned error status for {hostname}: "
-                    f"{data.get('Status')}"
-                )
-
-            return self.parse_result(data)
+    def raise_for_data(self) -> Self:
+        return self
 
 
-class PixivClientSession(ClientSession):
+class PixivRequestClient(AsyncClient):
     def __init__(
         self,
-        *args,
-        json_serialize=json.dumps,
-        limiter: Limiter | None = None,
+        *,
+        bypass: bool = False,
+        rate_limiter: Limiter | None = None,
+        verify: ssl.SSLContext | str | bool = True,
         **kwargs,
     ) -> None:
-        super().__init__(*args, json_serialize=json_serialize, **kwargs)
-        self._limiter = limiter
+        self._bypass = bypass
+        if bypass:
+            verify = False
+        super().__init__(verify=verify, **kwargs)
+        self._rate_limiter = rate_limiter
+
+    def _init_transport(
+        self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+        transport: AsyncBaseTransport | None = None,
+    ) -> AsyncBaseTransport:
+        if transport is not None:
+            return transport
+
+        return (AsyncByPassHTTPTransport if self._bypass else AsyncHTTPTransport)(
+            verify=verify,
+            cert=cert,
+            trust_env=trust_env,
+            http1=http1,
+            http2=http2,
+            limits=limits,
+        )
+
+    def _init_proxy_transport(
+        self,
+        proxy: Proxy,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+    ) -> AsyncBaseTransport:
+        return (AsyncByPassHTTPTransport if self._bypass else AsyncHTTPTransport)(
+            verify=verify,
+            cert=cert,
+            trust_env=trust_env,
+            http1=http1,
+            http2=http2,
+            limits=limits,
+            proxy=proxy,
+        )
+
+    async def send(
+        self,
+        request: Request,
+        *,
+        stream: bool = False,
+        auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+    ) -> Response:
+        if self._rate_limiter is not None:
+            await self._rate_limiter.try_acquire_async("async-pixiv-api")
+        return Response.from_httpx_response(
+            await super().send(
+                request,
+                stream=stream,
+                auth=auth,
+                follow_redirects=follow_redirects,
+            )
+        )
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}({self.closed}) of {id(self):#x}>"
-
-    async def _request(self, *args, **kwargs) -> ClientResponse:
-        if self._limiter is not None:
-            await self._limiter.try_acquire_async("async-pixiv-api")
-        return await super()._request(*args, **kwargs)
+        return f"<{self.__class__.__name__}{'(closed)' if self.is_closed else ''} of {id(self):#x}>"

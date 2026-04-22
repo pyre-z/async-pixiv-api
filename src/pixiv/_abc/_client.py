@@ -1,73 +1,76 @@
 import ssl
 from abc import ABC, abstractmethod
+from contextvars import ContextVar, Token
 from threading import RLock
 from typing import Any
 
 from aiohttp import TCPConnector
+from httpx import AsyncClient
 from pyrate_limiter import Duration
 from pyrate_limiter.limiter_factory import create_inmemory_limiter
 
 from pixiv._abc._config import PixivSettings
-from pixiv._utils.net import ByPassResolver, PixivClientSession
+from pixiv._utils.net import PixivRequestClient
 
 __all__ = ("PixivClient",)
+
+PixivClientContextVar: ContextVar["PixivClient"] = ContextVar("PixivClient")
+PixivClientContextToken: Token["PixivClient"] | None = None
 
 
 class PixivClient(ABC):
     _lock: RLock = RLock()
-    _session: PixivClientSession | None = None
-
-    _settings: PixivSettings
+    _request_client: PixivRequestClient | None = None
+    _settings: PixivSettings | None = None
 
     @property
-    def session(self) -> PixivClientSession:
-        if self._session is None:
+    def request_client(self) -> PixivRequestClient:
+        if self._request_client is None:
             with self._lock:
-                if self._session is None:
-                    self._session = self._new_session()
-        return self._session
+                if self._request_client is None:
+                    self._request_client = self._new_request_client()
+        return self._request_client
 
     @property
     def settings(self) -> PixivSettings:
+        if self._settings is None:
+            with self._lock:
+                if self._settings is None:
+                    raise RuntimeError("Settings not set")
         return self._settings
 
-    def _new_session(self) -> PixivClientSession:
-        kwargs: dict[str, Any] = {}
-        if self._settings.bypass:
-            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = ssl.CERT_NONE
+    @property
+    @abstractmethod
+    def is_authed(self) -> bool: ...
 
-            kwargs.update({"ssl": ssl_ctx, "resolver": ByPassResolver()})
+    def __init__(self) -> None:
+        global PixivClientContextToken
+        with self._lock:
+            PixivClientContextToken = PixivClientContextVar.set(self)
 
-        use_proxy = False
-        if self._settings.proxy:
-            try:
-                from aiohttp_socks import ProxyConnector
+    def __delete__(self) -> None:
+        if PixivClientContextToken is not None:
+            with self._lock:
+                if PixivClientContextToken is not None:
+                    PixivClientContextVar.reset(PixivClientContextToken)
 
-                connector = ProxyConnector.from_url(self._settings.proxy, **kwargs)
-            except ModuleNotFoundError as e:
-                if self._settings.proxy.startswith("socks"):
-                    raise e
-                else:
-                    connector = TCPConnector(**kwargs)
-                    use_proxy = True
-        else:
-            connector = TCPConnector(**kwargs)
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__}({'' if self.is_authed else 'not '}authed) of {id(self):#x}>"
 
-        return PixivClientSession(
-            self._settings.api_host,
-            limiter=create_inmemory_limiter(
-                rate_per_duration=self._settings.rate_limit.max_rate or -1,
-                duration=Duration.SECOND * self._settings.rate_limit.time_period,
+    def _new_request_client(self) -> PixivRequestClient:
+        return PixivRequestClient(
+            base_url=self.settings.api_host,
+            rate_limiter=create_inmemory_limiter(
+                rate_per_duration=self.settings.rate_limit.max_rate or -1,
+                duration=Duration.SECOND * self.settings.rate_limit.time_period,
             ),
-            connector=connector,
             headers={
                 "-".join(map(lambda s: s.title(), k.split("_"))): str(v)
-                for k, v in self._settings.headers.model_dump().items()
+                for k, v in self.settings.headers.model_dump().items()
                 if v
             },
-            proxy=self._settings.proxy if use_proxy and self._settings.proxy else None,
+            proxy=self.settings.proxy,
+            bypass=self.settings.bypass,
         )
 
     @abstractmethod
@@ -75,5 +78,5 @@ class PixivClient(ABC):
         pass
 
     @abstractmethod
-    async def set_auth(self, auth_content: str):
+    async def set_auth(self, auth_content):
         pass

@@ -95,14 +95,14 @@ async def main():
     await client.auth()
 
     # 使用 session 发起请求
-    response = await client.session.get(
+    response = await client.request_client.get(
         "https://app-api.pixiv.net/v1/illust/ranking"
     )
     data = await response.json()
     print(data)
 
     # 关闭会话
-    await client.session.close()
+    await client.request_client.close()
 
 
 if __name__ == "__main__":
@@ -121,13 +121,13 @@ async def main():
     )
     client = PixivWebClient(settings=settings)
 
-    response = await client.session.get(
+    response = await client.request_client.get(
         "https://www.pixiv.net/ajax/user/123456/profile"
     )
     data = await response.json()
     print(data)
 
-    await client.session.close()
+    await client.request_client.close()
 ```
 
 #### Web API 配置（Cookie 认证）
@@ -286,12 +286,12 @@ resolver = ByPassResolver()
 扩展的 `aiohttp.ClientSession`，内置请求速率限制。
 
 ```python
-from pixiv._utils.net import PixivClientSession
+from pixiv._utils.net import PixivRequestClient
 from pyrate_limiter import Duration
 
-session = PixivClientSession(
+session = PixivRequestClient(
     "https://api.example.com/",
-    limiter=create_inmemory_limiter(rate_per_duration=10, duration=Duration.SECOND),
+    rate_limiter=create_inmemory_limiter(rate_per_duration=10, duration=Duration.SECOND),
 )
 ```
 
@@ -327,7 +327,7 @@ from pixiv.web import PixivWebClient
 
 client = PixivWebClient()
 # 直接使用 session 发起请求
-response = await client.session.get("https://www.pixiv.net/ajax/user/123456/profile")
+response = await client.request_client.get("https://www.pixiv.net/ajax/user/123456/profile")
 ```
 
 > ⚠️ **安全提示**: 永远不要将 Token 或 Cookie 硬编码在代码中！
