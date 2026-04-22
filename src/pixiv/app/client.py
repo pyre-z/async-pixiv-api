@@ -1,15 +1,18 @@
 from pixiv._abc._client import PixivClient
+from pixiv.app.api.user import PixivUserAPI
 from pixiv.app.config import PixivAPPAPISettings
-from pixiv.app.model import Account
+from pixiv.app.model import AuthInfo
 
 __all__ = ("PixivAPPClient",)
 
 
 class PixivAPPClient(PixivClient):
+    USER: PixivUserAPI
+
     _settings: PixivAPPAPISettings
 
     _access_token: str | None
-    _account: Account | None
+    _auth_info: AuthInfo | None
 
     @property
     def settings(self) -> PixivAPPAPISettings:
@@ -22,9 +25,11 @@ class PixivAPPClient(PixivClient):
         super().__init__()
         self._settings = settings or PixivAPPAPISettings()
         self._access_token = None
-        self._account = None
+        self._auth_info = None
 
-    async def auth(self) -> Account:
+        self.USER = PixivUserAPI(self)
+
+    async def auth(self) -> AuthInfo:
         response = await self.request_client.post(
             "https://oauth.secure.pixiv.net/auth/token",
             data={
@@ -37,10 +42,13 @@ class PixivAPPClient(PixivClient):
         )
         response.raise_for_status()
         data = response.json()
-        self._account = Account.model_validate(data["user"])
-        self._access_token = data["access_token"]
-        return self._account
+        self._auth_info = AuthInfo.model_validate(data)
+        self._access_token = self._auth_info.access_token
+        self.request_client.headers.setdefault(
+            "Authorization", f"Bearer {self._access_token}"
+        )
+        return self._auth_info
 
-    async def set_auth(self, auth_content: str) -> Account:
+    async def set_auth(self, auth_content: str) -> AuthInfo:
         self.settings.refresh_token = auth_content
         return await self.auth()

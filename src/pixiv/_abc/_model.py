@@ -1,13 +1,12 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING, TypedDict
 
 from pydantic import BaseModel
 
-from pixiv._abc._client import PixivClient, PixivClientContextVar
+if TYPE_CHECKING:
+    from pixiv._abc._client import PixivClient
 
-__all__ = ("BasePixivModel",)
 
-
-class BasePixivModel[T: PixivClient](BaseModel):
+class AbstractPixivBaseModel[T: "PixivClient"](BaseModel):
     _pixiv_client: Optional[T] = None
 
     @property
@@ -25,4 +24,13 @@ class BasePixivModel[T: PixivClient](BaseModel):
             return f"<{self.__class__.__name__}>"
 
     def model_post_init(self, *_, **__) -> None:
+        from pixiv._abc._client import PixivClientContextVar
+
         self._pixiv_client = PixivClientContextVar.get()  # ty:ignore[invalid-assignment]
+
+
+class AbstractPixivBaseDetailModel[T: "PixivClient"](AbstractPixivBaseModel[T]):
+    pass
+
+class PixivParams(TypedDict, total=False):
+    pass

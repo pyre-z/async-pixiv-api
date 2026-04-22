@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import ssl
+from functools import lru_cache
 from threading import RLock
 from typing import Any, Iterable, Self
 
@@ -15,20 +16,22 @@ from httpx import (
     Limits,
     Proxy,
     Request,
+    Response,
 )
-from httpx import Response as _Response
 from httpx._client import UseClientDefault
 from httpx._config import DEFAULT_LIMITS
 from httpx._transports.default import SOCKET_OPTION
 from httpx._types import AuthTypes, CertTypes, ProxyTypes
 from pyrate_limiter import Limiter
 
+from pixiv.exceptions import PixivError
+
 try:
     import ujson as json
 except ImportError:
     import json
 
-__all__ = ("PixivRequestClient",)
+__all__ = ("PixivRequestClient", "ClientResponse")
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +184,7 @@ class AsyncByPassHTTPTransport(AsyncHTTPTransport):
 
         return None
 
-    async def handle_async_request(self, request: Request) -> Response:
+    async def handle_async_request(self, request: Request) -> ClientResponse:
         host = request.url.host
         ip = await self.resolve(host)
         if ip is not None:
@@ -189,14 +192,16 @@ class AsyncByPassHTTPTransport(AsyncHTTPTransport):
             request.url = request.url.copy_with(host=ip)
             # Keep Host header as original hostname for proper virtual hosting
             request.headers.setdefault("Host", host)
-        return Response.from_httpx_response(await super().handle_async_request(request))
+        return ClientResponse.from_httpx_response(
+            await super().handle_async_request(request)
+        )
 
 
-class Response(_Response):
+class ClientResponse(Response):
     _lock: RLock = RLock()
 
     @classmethod
-    def from_httpx_response(cls, response: _Response) -> Self:
+    def from_httpx_response(cls, response: Response) -> Self:
         """
         Convert a httpx Response to our custom Response subclass.
 
@@ -208,13 +213,10 @@ class Response(_Response):
         self.__dict__.update(response.__dict__)
         return self
 
+    @lru_cache(maxsize=4)
     def json(self, **kwargs: Any) -> Any:
         """Parse response body as JSON, using ujson if available."""
-        if not hasattr(self, "_json"):
-            with self._lock:
-                if not hasattr(self, "_json"):
-                    setattr(self, "_json", json.loads(self.text, **kwargs))
-        return getattr(self, "_json")
+        return json.loads(self.text, **kwargs)
 
     def raise_for_status(self) -> Self:
         request = self._request
@@ -251,6 +253,9 @@ class Response(_Response):
         raise HTTPStatusError(message, request=request, response=self)
 
     def raise_for_data(self) -> Self:
+        response_data: dict[str, Any] = self.json()
+        if response_data.get("error", {}):
+            raise PixivError(response_data["error"]["message"])
         return self
 
 
@@ -318,16 +323,21 @@ class PixivRequestClient(AsyncClient):
         stream: bool = False,
         auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
         follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
-    ) -> Response:
+    ) -> ClientResponse:
         if self._rate_limiter is not None:
             await self._rate_limiter.try_acquire_async("async-pixiv-api")
-        return Response.from_httpx_response(
+        return ClientResponse.from_httpx_response(
             await super().send(
                 request,
                 stream=stream,
                 auth=auth,
                 follow_redirects=follow_redirects,
             )
+        )
+
+    async def request(self, *args, **kwargs) -> ClientResponse:
+        return ClientResponse.from_httpx_response(
+            await super().request(*args, **kwargs)
         )
 
     def __repr__(self) -> str:

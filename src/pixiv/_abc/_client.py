@@ -1,18 +1,30 @@
-import ssl
 from abc import ABC, abstractmethod
 from contextvars import ContextVar, Token
 from threading import RLock
 from typing import Any
 
-from aiohttp import TCPConnector
-from httpx import AsyncClient
+from httpx import URL
+from httpx._client import USE_CLIENT_DEFAULT, UseClientDefault
+from httpx._types import (
+    AuthTypes,
+    CookieTypes,
+    HeaderTypes,
+    QueryParamTypes,
+    RequestContent,
+    RequestData,
+    RequestExtensions,
+    RequestFiles,
+    TimeoutTypes,
+)
 from pyrate_limiter import Duration
 from pyrate_limiter.limiter_factory import create_inmemory_limiter
 
 from pixiv._abc._config import PixivSettings
-from pixiv._utils.net import PixivRequestClient
+from pixiv._utils.net import ClientResponse, PixivRequestClient
+from pixiv._utils.typedefs import StrOrURL
 
 __all__ = ("PixivClient",)
+
 
 PixivClientContextVar: ContextVar["PixivClient"] = ContextVar("PixivClient")
 PixivClientContextToken: Token["PixivClient"] | None = None
@@ -80,3 +92,230 @@ class PixivClient(ABC):
     @abstractmethod
     async def set_auth(self, auth_content):
         pass
+
+    ####################################################################################
+
+    async def request(
+        self,
+        method: str,
+        url: StrOrURL,
+        *,
+        content: RequestContent | None = None,
+        data: RequestData | None = None,
+        files: RequestFiles | None = None,
+        json: Any | None = None,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> ClientResponse:
+        return await self.request_client.request(
+            method,
+            URL(str(url)),
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+    async def get(
+        self,
+        url: StrOrURL,
+        *,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault | None = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> ClientResponse:
+        return await self.request(
+            "GET",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+    async def options(
+        self,
+        url: StrOrURL,
+        *,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> ClientResponse:
+        return await self.request(
+            "OPTIONS",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+    async def head(
+        self,
+        url: StrOrURL,
+        *,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> ClientResponse:
+        return await self.request(
+            "HEAD",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+    async def post(
+        self,
+        url: StrOrURL,
+        *,
+        content: RequestContent | None = None,
+        data: RequestData | None = None,
+        files: RequestFiles | None = None,
+        json: Any | None = None,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> ClientResponse:
+        return await self.request(
+            "POST",
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+    async def put(
+        self,
+        url: StrOrURL,
+        *,
+        content: RequestContent | None = None,
+        data: RequestData | None = None,
+        files: RequestFiles | None = None,
+        json: Any | None = None,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> ClientResponse:
+        return await self.request(
+            "PUT",
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+    async def patch(
+        self,
+        url: StrOrURL,
+        *,
+        content: RequestContent | None = None,
+        data: RequestData | None = None,
+        files: RequestFiles | None = None,
+        json: Any | None = None,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> ClientResponse:
+        return await self.request(
+            "PATCH",
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+    async def delete(
+        self,
+        url: StrOrURL,
+        *,
+        params: QueryParamTypes | None = None,
+        headers: HeaderTypes | None = None,
+        cookies: CookieTypes | None = None,
+        auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+        timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+        extensions: RequestExtensions | None = None,
+    ) -> ClientResponse:
+        return await self.request(
+            "DELETE",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
