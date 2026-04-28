@@ -1,7 +1,8 @@
 import importlib
 from abc import ABC
+from enum import Enum
 from types import ModuleType
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Iterable, TypedDict
 
 if TYPE_CHECKING:
     from pixiv._abc._client import PixivClient
@@ -13,6 +14,8 @@ __all__ = ("AbstractPixivAPIBase",)
 
 class PixivAPIPath(TypedDict):
     detail: str
+    search: str
+    recommended: str
 
 
 class AbstractPixivAPIBase[ClientType: "PixivClient"](ABC):
@@ -46,5 +49,38 @@ class AbstractPixivAPIBase[ClientType: "PixivClient"](ABC):
         data = response.raise_for_status().raise_for_data().json()
         detail_cls: type["PixivBaseModel"] = getattr(
             self._model_module(), f"{self.type.title()}Detail"
+        )
+        return detail_cls.model_validate(data)
+
+    async def search(self, word: str | Iterable[str], **kwargs) -> "PixivBaseModel":
+        word = word if isinstance(word, str) else " ".join(word)
+        url_path = self.API_PATH["search"].format(type=self.type)
+        response = await self.client.get(
+            url_path,
+            params={
+                k: (str(v) if isinstance(v, (int, Enum)) else v)
+                for k, v in {"word": word, **kwargs}.items()
+                if v is not None
+            },
+        )
+        data = response.raise_for_status().raise_for_data().json()
+        detail_cls: type["PixivBaseModel"] = getattr(
+            self._model_module(), f"{self.type.title()}SearchResult"
+        )
+        return detail_cls.model_validate(data)
+
+    async def recommended(self, **kwargs) -> "PixivBaseModel":
+        url_path = self.API_PATH["recommended"].format(type=self.type)
+        response = await self.client.get(
+            url_path,
+            params={
+                k: (str(v) if isinstance(v, (int, Enum)) else v)
+                for k, v in kwargs.items()
+                if v is not None
+            },
+        )
+        data = response.raise_for_status().raise_for_data().json()
+        detail_cls: type["PixivBaseModel"] = getattr(
+            self._model_module(), f"{self.type.title()}RecommendedResult"
         )
         return detail_cls.model_validate(data)

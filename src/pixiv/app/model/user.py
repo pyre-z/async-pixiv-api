@@ -1,10 +1,15 @@
 from datetime import date
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
-from pydantic import EmailStr
+from pydantic import EmailStr, Field, field_validator
 from yarl import URL
 
 from pixiv.app.model.base import PixivBaseModel
+from pixiv.app.model.other import PageResult
+
+if TYPE_CHECKING:
+    from pixiv.app.model import Illust, Novel
 
 
 class UserGender(StrEnum):
@@ -27,14 +32,22 @@ class User(PixivBaseModel):
     name: str
     account: str
     profile_image_urls: UserProfileImageUrls
-    comment: str | None
+    comment: str | None = None
     is_followed: bool
-    is_access_blocking_user: bool
+    is_access_blocking_user: bool | None = None
 
 
 class Profile(PixivBaseModel):
+    @field_validator("gender", mode="before")
+    @classmethod
+    def none_to_gender(cls, value: str | None) -> UserGender:
+        """所有空字符串转为 None"""
+        if value is None:
+            return UserGender.Unknown
+        return UserGender(value)
+
     webpage: URL | None
-    gender: UserGender
+    gender: UserGender = UserGender.Unknown
     birth: date | None = None
     birth_year: int | None = None
     region: str
@@ -115,3 +128,19 @@ class AuthInfo(PixivBaseModel):
     scope: str | None
     refresh_token: str
     user: Account
+
+
+class UserPreview(PixivBaseModel):
+    user: User
+    illusts: list["Illust"]
+    novels: list["Novel"]
+    is_muted: bool
+
+
+class UserSearchResult(PageResult[UserPreview]):
+    previews: list[UserPreview] = Field(alias="user_previews")
+    next_url: URL | None
+
+
+class UserRecommendedResult(UserSearchResult):
+    pass

@@ -9,4 +9,8 @@ __all__ = ("PixivAPIBase",)
 
 
 class PixivAPIBase(AbstractPixivAPIBase["PixivAPPClient"]):
-    API_PATH = {"detail": "v1/{type}/detail?{type}_id={id}"}
+    API_PATH = {
+        "detail": "v1/{type}/detail?{type}_id={id}",
+        "search": "v1/search/{type}",
+        "recommended": "/v1/{type}/recommended",
+    }

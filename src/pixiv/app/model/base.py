@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any
 
-from pydantic import model_validator
+from pydantic import ConfigDict, model_validator
 
 from pixiv._abc._model import AbstractPixivBaseModel
 
@@ -11,6 +11,8 @@ __all__ = ("PixivBaseModel",)
 
 
 class PixivBaseModel(AbstractPixivBaseModel["PixivAPPClient"]):
+    model_config = ConfigDict()
+
     @model_validator(mode="before")
     @classmethod
     def empty_str_to_none(cls, values: dict[str, Any]) -> dict[str, Any]:
