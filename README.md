@@ -1,6 +1,8 @@
 # async-pixiv-api ✨
 
-一个面向异步编程的 Pixiv API Python 客户端库，基于 `aiohttp`、`pydantic` 和 `pyrate-limiter` 构建。
+一个面向异步编程的 Pixiv API Python 客户端库，基于 `httpx`、`pydantic` 和 `pyrate-limiter` 构建。
+
+> 🚧 **正在开发中，API 可能随时变动，请勿用于生产环境。**
 
 [![PyPI](https://img.shields.io/pypi/v/async-pixiv-api.svg)](https://pypi.org/project/async-pixiv-api/)
 [![Python](https://img.shields.io/pypi/pyversions/async-pixiv-api.svg)](https://pypi.org/project/async-pixiv-api/)
