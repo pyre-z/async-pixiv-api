@@ -35,11 +35,10 @@ class PixivUserAPI(PixivAPIBase):
                 start_date = today - datetime.timedelta(days=7)
                 end_date = today
             case SearchDurationParam.WithinLastMonth:
-                start_date = (
-                    today.replace(month=today.month - 1)
-                    if today.month > 1
-                    else today.replace(year=today.year - 1, month=12)
-                )
+                start_date = today - datetime.timedelta(days=30)
+                end_date = today
+            case SearchDurationParam.WithinLastYear:
+                start_date = today - datetime.timedelta(days=365)
                 end_date = today
         start_date_param = end_date_param = None
         if end_date is not None:

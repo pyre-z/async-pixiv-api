@@ -37,7 +37,7 @@ class IllustMetaPageImageUrls(IllustImageUrls):
 
 
 class IllustMetaPage(PixivBaseModel):
-    image_urls: IllustImageUrls
+    image_urls: IllustMetaPageImageUrls
 
 
 class Illust(PixivBaseModel):

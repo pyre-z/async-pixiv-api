@@ -18,6 +18,7 @@ class PixivAPPClient(PixivClient):
     def settings(self) -> PixivAPPAPISettings:
         return self._settings
 
+    @property
     def is_authed(self) -> bool:
         return self._access_token is not None
 

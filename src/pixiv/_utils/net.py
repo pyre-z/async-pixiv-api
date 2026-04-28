@@ -3,7 +3,6 @@ import logging
 import re
 import ssl
 from functools import lru_cache
-from threading import RLock
 from typing import Any, Iterable, Self
 
 import httpcore
@@ -163,19 +162,16 @@ class AsyncByPassHTTPTransport(AsyncHTTPTransport):
         r"(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})$"
     )
 
-    _lock: RLock = RLock()
     _request_client: "PixivRequestClient | None" = None
     _proxy: ProxyTypes | None = None
 
     @property
     def request_client(self) -> "PixivRequestClient":
         if self._request_client is None:
-            with self._lock:
-                if self._request_client is None:
-                    self._request_client = PixivRequestClient(
-                        headers={"accept": "application/dns-json"},
-                        proxy=self._proxy,
-                    )
+            self._request_client = PixivRequestClient(
+                headers={"accept": "application/dns-json"},
+                proxy=self._proxy,
+            )
         return self._request_client
 
     # noinspection PyUnusedLocal
@@ -308,8 +304,6 @@ class AsyncByPassHTTPTransport(AsyncHTTPTransport):
 
 
 class ClientResponse(Response):
-    _lock: RLock = RLock()
-
     @classmethod
     def from_httpx_response(cls, response: Response) -> Self:
         """
@@ -448,9 +442,7 @@ class PixivRequestClient(AsyncClient):
         )
 
     async def request(self, *args, **kwargs) -> ClientResponse:
-        return ClientResponse.from_httpx_response(
-            await super().request(*args, **kwargs)
-        )
+        return await super().request(*args, **kwargs)  # type: ignore[return-value]
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}{'(closed)' if self.is_closed else ''} of {id(self):#x}>"
