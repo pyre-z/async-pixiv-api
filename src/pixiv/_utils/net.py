@@ -6,34 +6,135 @@ from functools import lru_cache
 from threading import RLock
 from typing import Any, Iterable, Self
 
+import httpcore
 from aiocache import cached
+from httpcore._backends.anyio import AnyIOBackend
+from httpcore._backends.base import SOCKET_OPTION as HC_SOCKET_OPTION
+from httpcore._backends.base import AsyncNetworkBackend, AsyncNetworkStream
 from httpx import (
     USE_CLIENT_DEFAULT,
     AsyncBaseTransport,
     AsyncClient,
-    AsyncHTTPTransport,
     HTTPStatusError,
     Limits,
     Proxy,
     Request,
     Response,
 )
+from httpx import AsyncHTTPTransport as DefaultAsyncHTTPTransport
 from httpx._client import UseClientDefault
-from httpx._config import DEFAULT_LIMITS
+from httpx._config import DEFAULT_LIMITS, create_ssl_context
 from httpx._transports.default import SOCKET_OPTION
 from httpx._types import AuthTypes, CertTypes, ProxyTypes
 from pyrate_limiter import Limiter
 
+from pixiv._abc._config import PixivRetrySettings
 from pixiv.exceptions import PixivError
 
 try:
-    import ujson as json
+    import ujson as json  # ty:ignore[unresolved-import]
 except ImportError:
     import json
 
 __all__ = ("PixivRequestClient", "ClientResponse")
 
 logger = logging.getLogger(__name__)
+
+
+class AsyncHTTPTransport(DefaultAsyncHTTPTransport):
+    # noinspection PyUnusedLocal
+    def __init__(
+        self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+        proxy: ProxyTypes | None = None,
+        uds: str | None = None,
+        local_address: str | None = None,
+        retries: int = 0,
+        socket_options: Iterable[SOCKET_OPTION] | None = None,
+        retry: PixivRetrySettings | None = None,
+    ) -> None:
+        super().__init__(
+            verify,
+            cert,
+            trust_env,
+            http1,
+            http2,
+            limits,
+            proxy,
+            uds,
+            local_address,
+            retries,
+            socket_options,
+        )
+        self._retry = retry or PixivRetrySettings()
+
+    async def handle_async_request(
+        self,
+        request: Request,
+    ) -> "ClientResponse":
+        count = 0
+        error = None
+        retry_times = self._retry.times or 1
+        retry_sleep_time = self._retry.sleep_time
+        while count < retry_times:
+            count += 1
+            try:
+                return ClientResponse.from_httpx_response(
+                    await super().handle_async_request(request)
+                )
+            except Exception as e:
+                error = e
+                if retry_times < 2:
+                    break
+                logger.warning(
+                    f"Retry {count} times failed, sleep {retry_sleep_time}s, error: {e}"
+                )
+                await asyncio.sleep(retry_sleep_time)
+        raise error or RuntimeError(f"Retry {count} times failed.")
+
+
+class DoHNetworkBackend(AsyncNetworkBackend):
+    """Network backend that resolves bypass hosts via DNS-over-HTTPS.
+
+    Wraps the default AnyIOBackend, intercepting TCP connections for
+    bypass hosts to use DoH-resolved IPs while keeping the original
+    hostname intact for correct TLS SNI.
+    """
+
+    def __init__(self, transport: "AsyncByPassHTTPTransport") -> None:
+        self._transport = transport
+        self._backend = AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[HC_SOCKET_OPTION] | None = None,
+    ) -> AsyncNetworkStream:
+        ip = await self._transport.resolve(host)
+        if ip is not None:
+            host = ip
+        return await self._backend.connect_tcp(
+            host, port, timeout, local_address, socket_options
+        )
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Iterable[HC_SOCKET_OPTION] | None = None,
+    ) -> AsyncNetworkStream:
+        return await self._backend.connect_unix_socket(path, timeout, socket_options)
+
+    async def sleep(self, seconds: float) -> None:
+        await self._backend.sleep(seconds)
 
 
 class AsyncByPassHTTPTransport(AsyncHTTPTransport):
@@ -91,11 +192,10 @@ class AsyncByPassHTTPTransport(AsyncHTTPTransport):
         local_address: str | None = None,
         retries: int = 0,
         socket_options: Iterable[SOCKET_OPTION] | None = None,
+        retry: PixivRetrySettings | None = None,
         endpoints: list[str] | None = None,
         force_hosts: bool = False,
     ) -> None:
-        # Disable cert verification for bypass mode (SNI mismatch issue with DoH IPs)
-        # We only do DoH resolution when not using a proxy to avoid SNI issues
         super().__init__(
             False,
             cert,
@@ -108,10 +208,32 @@ class AsyncByPassHTTPTransport(AsyncHTTPTransport):
             local_address,
             retries,
             socket_options,
+            retry=retry,
         )
         self._proxy = proxy
         self.endpoints = endpoints or self.DEFAULT_ENDPOINTS
         self.force_hosts = force_hosts
+
+        # Replace pool with DoH-backed pool for direct (non-proxy) connections.
+        # DoH resolution happens in the network backend's connect_tcp, so the
+        # URL hostname is preserved for correct TLS SNI.
+        if self._proxy is None:
+            ssl_context = create_ssl_context(
+                verify=False, cert=cert, trust_env=trust_env
+            )
+            self._pool = httpcore.AsyncConnectionPool(
+                ssl_context=ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                uds=uds,
+                local_address=local_address,
+                retries=retries,
+                socket_options=socket_options,
+                network_backend=DoHNetworkBackend(self),
+            )
 
     async def query_endpoint(self, endpoint: str, host: str) -> str | None:
         """Query DoH endpoints in parallel, first successful result wins"""
@@ -184,18 +306,6 @@ class AsyncByPassHTTPTransport(AsyncHTTPTransport):
 
         return None
 
-    async def handle_async_request(self, request: Request) -> ClientResponse:
-        host = request.url.host
-        ip = await self.resolve(host)
-        if ip is not None:
-            # Replace URL host with resolved IP for socket connection
-            request.url = request.url.copy_with(host=ip)
-            # Keep Host header as original hostname for proper virtual hosting
-            request.headers.setdefault("Host", host)
-        return ClientResponse.from_httpx_response(
-            await super().handle_async_request(request)
-        )
-
 
 class ClientResponse(Response):
     _lock: RLock = RLock()
@@ -265,12 +375,12 @@ class PixivRequestClient(AsyncClient):
         *,
         bypass: bool = False,
         rate_limiter: Limiter | None = None,
+        retry: PixivRetrySettings | None = None,
         verify: ssl.SSLContext | str | bool = True,
         **kwargs,
     ) -> None:
         self._bypass = bypass
-        if bypass:
-            verify = False
+        self._retry = retry or PixivRetrySettings()
         super().__init__(verify=verify, **kwargs)
         self._rate_limiter = rate_limiter
 
@@ -294,6 +404,7 @@ class PixivRequestClient(AsyncClient):
             http1=http1,
             http2=http2,
             limits=limits,
+            retry=self._retry,
         )
 
     def _init_proxy_transport(
@@ -314,6 +425,7 @@ class PixivRequestClient(AsyncClient):
             http2=http2,
             limits=limits,
             proxy=proxy,
+            retry=self._retry,
         )
 
     async def send(

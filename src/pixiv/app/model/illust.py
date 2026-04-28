@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from yarl import URL
 
 from pixiv.app.model import PixivBaseModel
-from pixiv.app.model.other import Tag
+from pixiv.app.model.other import Request, Tag
 
 if TYPE_CHECKING:
     from pixiv.app.model import User
@@ -38,20 +38,6 @@ class IllustMetaPageImageUrls(IllustImageUrls):
 
 class IllustMetaPage(PixivBaseModel):
     image_urls: IllustImageUrls
-
-
-class Request(PixivBaseModel):
-    class RequestInfo(PixivBaseModel):
-        class CollaborateStatus(PixivBaseModel):
-            collaborate_anonymous_flag: bool
-            collaborate_user_samples: list["User"]
-
-        collaborate_status: CollaborateStatus
-        fan_user_id: int | None
-        role: str
-
-    request_info: RequestInfo
-    request_users: list["User"]
 
 
 class Illust(PixivBaseModel):

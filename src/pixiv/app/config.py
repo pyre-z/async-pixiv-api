@@ -4,6 +4,7 @@ from pydantic_settings import SettingsConfigDict
 from pixiv._abc._config import (
     PixivAPIHeadersSettings,
     PixivRateLimitSettings,
+    PixivRetrySettings,
     PixivSettings,
 )
 
@@ -11,6 +12,7 @@ __all__ = (
     "PixivAPPAPISettings",
     "PixivAppApiHeadersSettings",
     "PixivRateLimitSettings",
+    "PixivRetrySettings",
 )
 
 

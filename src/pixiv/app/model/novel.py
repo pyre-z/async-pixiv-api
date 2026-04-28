@@ -3,7 +3,8 @@ from typing import TYPE_CHECKING
 
 from yarl import URL
 
-from pixiv.app.model import PixivBaseModel, Tag
+from pixiv.app.model.base import PixivBaseModel
+from pixiv.app.model.other import Request, Tag
 
 if TYPE_CHECKING:
     from pixiv.app.model import User
@@ -46,4 +47,4 @@ class Novel(PixivBaseModel):
     is_mypixiv_only: bool
     is_x_restricted: bool
     novel_ai_type: int
-    request: None
+    request: Request | None

@@ -20,6 +20,11 @@ class PixivAPIHeadersSettings(BaseSettings):
     referer: str = "https://www.pixiv.net/"
 
 
+class PixivRetrySettings(BaseSettings):
+    times: int | None = None
+    sleep_time: float = 5
+
+
 class PixivSettings(BaseSettings):
     api_host: str
     """基础请求地址"""
@@ -38,3 +43,6 @@ class PixivSettings(BaseSettings):
 
     rate_limit: PixivRateLimitSettings = Field(default_factory=PixivRateLimitSettings)
     """请求频率限制"""
+
+    retry: PixivRetrySettings = Field(default_factory=PixivRetrySettings)
+    """请求失败重试设置"""
