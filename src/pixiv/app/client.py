@@ -1,4 +1,5 @@
 from pixiv._abc._client import PixivClient
+from pixiv.app.api.illust import PixivIllustAPI
 from pixiv.app.api.user import PixivUserAPI
 from pixiv.app.config import PixivAPPAPISettings
 from pixiv.app.model import AuthInfo
@@ -7,7 +8,8 @@ __all__ = ("PixivAPPClient",)
 
 
 class PixivAPPClient(PixivClient):
-    USER: PixivUserAPI
+    User: PixivUserAPI
+    Illust: PixivIllustAPI
 
     _settings: PixivAPPAPISettings
 
@@ -28,7 +30,8 @@ class PixivAPPClient(PixivClient):
         self._access_token = None
         self._auth_info = None
 
-        self.USER = PixivUserAPI(self)
+        self.User = PixivUserAPI(self)
+        self.Illust = PixivIllustAPI(self)
 
     async def auth(self) -> AuthInfo:
         response = await self.request_client.post(

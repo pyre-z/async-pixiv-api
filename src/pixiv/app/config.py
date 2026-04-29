@@ -1,12 +1,9 @@
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from pixiv._abc._config import (
-    PixivAPIHeadersSettings,
-    PixivRateLimitSettings,
-    PixivRetrySettings,
-    PixivSettings,
-)
+from pixiv._abc._config import PixivAPIHeadersSettings, PixivSettings
+from pixiv._abc._config import PixivRateLimitSettings as _PixivRateLimitSettings
+from pixiv._abc._config import PixivRetrySettings as _PixivRetrySettings
 
 __all__ = (
     "PixivAPPAPISettings",
@@ -16,8 +13,19 @@ __all__ = (
 )
 
 
+class PixivRateLimitSettings(_PixivRateLimitSettings):
+    model_config = SettingsConfigDict(env_prefix="pixiv_app_rate_limit_")
+
+    max_rate: int | None = 5
+    time_period: int = 1
+
+
+class PixivRetrySettings(_PixivRetrySettings):
+    model_config = SettingsConfigDict(env_prefix="pixiv_app_retry_")
+
+
 class PixivAppApiHeadersSettings(PixivAPIHeadersSettings):
-    model_config = SettingsConfigDict(extra="allow")
+    model_config = SettingsConfigDict(env_prefix="pixiv_app_headers", extra="allow")
 
     user_agent: str = "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)"
 
@@ -49,7 +57,8 @@ class PixivAPPAPISettings(PixivSettings):
     timeout: float = 30
     """请求超时时间"""
 
-    rate_limit: PixivRateLimitSettings = PixivRateLimitSettings(
-        max_rate=5, time_period=1
-    )
+    rate_limit: PixivRateLimitSettings = Field(default_factory=PixivRateLimitSettings)
     """请求频率限制"""
+
+    retry: PixivRetrySettings = Field(default_factory=PixivRetrySettings)
+    """请求失败重试设置"""

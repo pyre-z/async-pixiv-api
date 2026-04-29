@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, computed_field
 from pydantic_settings import SettingsConfigDict
 
 from pixiv._abc._config import (
@@ -34,7 +34,13 @@ class PixivWebAPISettings(PixivSettings):
     )
     """请求的额外 Headers"""
 
-    rate_limit: PixivRateLimitSettings = PixivRateLimitSettings(
-        max_rate=9, time_period=2
-    )
-    """请求频率限制"""
+    rate_limit_max_rate: int | None = Field(default=9)
+    rate_limit_time_period: int = Field(default=2)
+
+    @computed_field
+    @property
+    def rate_limit(self) -> PixivRateLimitSettings:
+        return PixivRateLimitSettings(
+            max_rate=self.rate_limit_max_rate,
+            time_period=self.rate_limit_time_period,
+        )

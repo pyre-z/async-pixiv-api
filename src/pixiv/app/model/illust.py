@@ -69,3 +69,9 @@ class Illust(PixivBaseModel):
     illust_ai_type: int
     illust_book_style: int
     request: Request | None
+    restriction_attributes: list[str] | None = None
+    comment_access_control: int = 0
+
+
+class IllustDetail(PixivBaseModel):
+    illust: Illust

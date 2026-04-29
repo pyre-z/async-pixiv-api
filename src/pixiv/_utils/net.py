@@ -31,7 +31,7 @@ from pixiv._abc._config import PixivRetrySettings
 from pixiv.exceptions import PixivError
 
 try:
-    import ujson as json  # ty:ignore[unresolved-import]
+    import ujson as json  # ty:ignore[unresolved-import, unused-ignore-comment]
 except ImportError:
     import json
 
@@ -442,7 +442,9 @@ class PixivRequestClient(AsyncClient):
         )
 
     async def request(self, *args, **kwargs) -> ClientResponse:
-        return await super().request(*args, **kwargs)  # type: ignore[return-value]
+        return ClientResponse.from_httpx_response(
+            await super().request(*args, **kwargs)
+        )
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}{'(closed)' if self.is_closed else ''} of {id(self):#x}>"

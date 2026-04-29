@@ -3,7 +3,6 @@ from contextvars import ContextVar, Token
 from typing import Any
 
 import dotenv
-
 from httpx import URL
 from httpx._client import USE_CLIENT_DEFAULT, UseClientDefault
 from httpx._types import (
@@ -52,9 +51,9 @@ class PixivClient(ABC):
     def is_authed(self) -> bool: ...
 
     def __init__(self) -> None:
-        dotenv.load_dotenv()
         global PixivClientContextToken
         PixivClientContextToken = PixivClientContextVar.set(self)
+        dotenv.load_dotenv()
 
     def __del__(self) -> None:
         try:
@@ -87,6 +86,7 @@ class PixivClient(ABC):
             },
             proxy=self.settings.proxy,
             bypass=self.settings.bypass,
+            retry=self.settings.retry,
         )
 
     @abstractmethod

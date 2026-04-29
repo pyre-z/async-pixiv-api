@@ -1,20 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "async-pixiv-api"
 version = "0.0.1"
 description = "Async Pixiv API wrapper for Python3.14+"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.14"
 authors = [
     { name = "PyreZ", email = "pyre_z@gmail.com" },
 ]
-requires-python = ">=3.14"
+keywords = ["pixiv", "async", "api", "httpx", "pydantic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
 dependencies = [
-    "aiocache[memcached]>=0.12.3",
-    "aiohttp-socks>=0.11.0",
+    "aiocache>=0.12.3",
     "httpx>=0.28.1",
-    "pydantic-settings>=2.14.0",
     "pydantic[email,timezone]>=2.13.3",
+    "pydantic-settings>=2.14.0",
     "pyrate-limiter>=4.1.0",
     "python-dotenv[cli]",
+    "yarl>=1.18.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/PyreZ/async-pixiv-api"
+Repository = "https://github.com/PyreZ/async-pixiv-api"
+Issues = "https://github.com/PyreZ/async-pixiv-api/issues"
 
 [dependency-groups]
 dev = [
@@ -29,6 +49,9 @@ speedups = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "module"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pixiv"]
 
 [tool.uv.sources]
 logre = { git = "https://github.com/pyre-z/logre.git" }

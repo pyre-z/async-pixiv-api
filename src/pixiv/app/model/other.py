@@ -28,6 +28,13 @@ class PageResult[T](PixivBaseModel):
                 yield item
 
 
+class PixivDetailModel(PixivBaseModel):
+    def __repr__(self) -> str:
+        cls_name = self.__class__.__name__
+        attr_name = cls_name.removesuffix("Detail").lower()
+        return f"<{cls_name} {attr_name}={getattr(self, attr_name, None)}>"
+
+
 class Request(PixivBaseModel):
     class RequestInfo(PixivBaseModel):
         class CollaborateStatus(PixivBaseModel):

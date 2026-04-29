@@ -1,12 +1,13 @@
-from pixiv.app.model import (
-    UserSearchResult,
-    SearchSortParam,
-    SearchDurationParam,
-    SearchTargetParam,
-)
-from typing import TYPE_CHECKING, Iterable
 import datetime
+from typing import TYPE_CHECKING, Iterable, cast
+
 from pixiv.app.api.base import PixivAPIBase
+from pixiv.app.model import (
+    SearchDurationParam,
+    SearchSortParam,
+    SearchTargetParam,
+    UserSearchResult,
+)
 
 if TYPE_CHECKING:
     from pixiv.app import PixivAPPClient  # noqa: F401
@@ -47,12 +48,15 @@ class PixivUserAPI(PixivAPIBase):
             start_date_param = start_date.strftime("%Y-%m-%d")
             end_date_param = end_date_param or today.strftime("%Y-%m-%d")
 
-        return await super().search(
-            word,
-            sort=sort,
-            target=target,
-            start_date=start_date_param,
-            end_date=end_date_param,
-            offset=offset,
-            **kwargs,
-        )  # ty:ignore[invalid-return-type]
+        return cast(
+            UserSearchResult,
+            await super().search(
+                word,
+                sort=sort,
+                target=target,
+                start_date=start_date_param,
+                end_date=end_date_param,
+                offset=offset,
+                **kwargs,
+            ),
+        )

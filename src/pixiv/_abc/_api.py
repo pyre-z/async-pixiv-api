@@ -1,21 +1,54 @@
 import importlib
 from abc import ABC
+from collections.abc import Awaitable, Callable
 from enum import Enum
+from functools import lru_cache
 from types import ModuleType
-from typing import TYPE_CHECKING, Iterable, TypedDict
+from typing import TYPE_CHECKING, Any, Iterable, TypedDict, TypeVar, cast
 
 if TYPE_CHECKING:
     from pixiv._abc._client import PixivClient
     from pixiv.app.model import PixivBaseModel
 
 
-__all__ = ("AbstractPixivAPIBase",)
+__all__ = ("AbstractPixivAPIBase", "need_auth")
+
+
+ClientType = TypeVar("ClientType", bound="PixivClient")
 
 
 class PixivAPIPath(TypedDict):
     detail: str
     search: str
     recommended: str
+
+
+@lru_cache
+def _parse_value(value):
+    match value:
+        case Enum():
+            return _parse_value(value.value)
+        case _:
+            return str(value)
+
+
+def _build_params(**kwargs) -> dict[str, Any]:
+    params = {}
+    for name, value in kwargs.items():
+        if value is None:
+            continue
+        params[name] = _parse_value(value)
+    return params
+
+
+def need_auth[**P, R](method: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        self = cast("AbstractPixivAPIBase[PixivClient]", args[0])
+        if not self.client.is_authed:
+            raise RuntimeError("Not authenticated")
+        return await method(*args, **kwargs)
+
+    return wrapper
 
 
 class AbstractPixivAPIBase[ClientType: "PixivClient"](ABC):
@@ -52,16 +85,12 @@ class AbstractPixivAPIBase[ClientType: "PixivClient"](ABC):
         )
         return detail_cls.model_validate(data)
 
+    @need_auth
     async def search(self, word: str | Iterable[str], **kwargs) -> "PixivBaseModel":
         word = word if isinstance(word, str) else " ".join(word)
         url_path = self.API_PATH["search"].format(type=self.type)
         response = await self.client.get(
-            url_path,
-            params={
-                k: (str(v) if isinstance(v, (int, Enum)) else v)
-                for k, v in {"word": word, **kwargs}.items()
-                if v is not None
-            },
+            url_path, params=_build_params(word=word, **kwargs)
         )
         data = response.raise_for_status().raise_for_data().json()
         detail_cls: type["PixivBaseModel"] = getattr(
@@ -69,16 +98,10 @@ class AbstractPixivAPIBase[ClientType: "PixivClient"](ABC):
         )
         return detail_cls.model_validate(data)
 
+    @need_auth
     async def recommended(self, **kwargs) -> "PixivBaseModel":
         url_path = self.API_PATH["recommended"].format(type=self.type)
-        response = await self.client.get(
-            url_path,
-            params={
-                k: (str(v) if isinstance(v, (int, Enum)) else v)
-                for k, v in kwargs.items()
-                if v is not None
-            },
-        )
+        response = await self.client.get(url_path, params=_build_params(**kwargs))
         data = response.raise_for_status().raise_for_data().json()
         detail_cls: type["PixivBaseModel"] = getattr(
             self._model_module(), f"{self.type.title()}RecommendedResult"
