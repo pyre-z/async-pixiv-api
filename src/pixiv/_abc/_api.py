@@ -4,17 +4,14 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 from functools import lru_cache
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Iterable, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, TypedDict, cast
 
 if TYPE_CHECKING:
     from pixiv._abc._client import PixivClient
-    from pixiv.app.model import PixivBaseModel
+    from pixiv.app.model.base import PixivBaseModel
 
 
 __all__ = ("AbstractPixivAPIBase", "need_auth")
-
-
-ClientType = TypeVar("ClientType", bound="PixivClient")
 
 
 class PixivAPIPath(TypedDict):
@@ -72,13 +69,15 @@ class AbstractPixivAPIBase[ClientType: "PixivClient"](ABC):
         )
 
     @staticmethod
-    def _build_params(**kwargs) -> dict[str, Any]:
-        params = {}
-        for name, value in kwargs.items():
+    def _build_params(
+        params: Mapping[str, Any] | None = None, **kwargs
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for name, value in (dict(params or {}) | kwargs).items():
             if value is None:
                 continue
-            params[name] = _parse_value(value)
-        return params
+            result[name] = _parse_value(value)
+        return result
 
     async def detail(self, id: int | str) -> "PixivBaseModel":
         url_path = self.API_PATH["detail"].format(id=id, type=self.type)
@@ -101,7 +100,6 @@ class AbstractPixivAPIBase[ClientType: "PixivClient"](ABC):
         )
         return cls.model_validate(data)
 
-    @need_auth
     async def recommended(self, **kwargs) -> "PixivBaseModel":
         url_path = self.API_PATH["recommended"].format(type=self.type)
         response = await self.client.get(url_path, params=self._build_params(**kwargs))

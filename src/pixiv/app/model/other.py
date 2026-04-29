@@ -31,6 +31,9 @@ class PageResult[T](ABC, Result):
     @abstractmethod
     def __iter__(self) -> Iterator[T]: ...  # ty:ignore[invalid-method-override]
 
+    def __len__(self) -> int:
+        return len(list(self.__iter__()))
+
     async def __aiter__(self) -> AsyncIterator[T]:
         for item in self:
             yield item

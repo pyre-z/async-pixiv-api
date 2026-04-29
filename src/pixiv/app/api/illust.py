@@ -3,8 +3,8 @@ import datetime
 from typing import Iterable, cast
 
 from pixiv.app.api.base import PixivAPIBase
-from pixiv.app.model.illust import IllustSearchResult
-from pixiv.app.model.param import Duration, Sort, Target
+from pixiv.app.model.illust import IllustRecommendedResult, IllustSearchResult
+from pixiv.app.model.param import ContentType, Duration, Sort, Target
 
 __all__ = ("PixivIllustAPI",)
 
@@ -82,3 +82,41 @@ class PixivIllustAPI(PixivAPIBase):
                 **kwargs,
             ),
         )
+
+    async def recommended(
+        self,
+        content_type: ContentType = ContentType.Illust,
+        include_ranking_label: bool | None = None,
+        max_bookmark_id_for_recommend: int | str | None = None,
+        min_bookmark_id_for_recent_illust: int | str | None = None,
+        offset: int | None = None,
+        include_ranking_illusts: str | bool | None = None,
+        bookmark_illust_ids: list[int | str] | None = None,
+        include_privacy_policy: list[int | str] | None = None,
+        viewed: list[str] | None = None,
+        **kwargs,
+    ) -> IllustRecommendedResult:
+        url_path = self.API_PATH["recommended"].format(type=self.type) + (
+            "" if self.client.is_authed else "-nologin"
+        )
+        params = {
+            "content_type": content_type.value,
+            "include_ranking_label": "true" if include_ranking_label else "false",
+            "max_bookmark_id_for_recommend": max_bookmark_id_for_recommend,
+            "min_bookmark_id_for_recent_illust": min_bookmark_id_for_recent_illust,
+            "offset": offset,
+            "include_ranking_illusts": "true" if include_ranking_illusts else "false",
+            "bookmark_illust_ids": (
+                bookmark_illust_ids
+                if bookmark_illust_ids is None
+                else ",".join(map(str, bookmark_illust_ids))
+            ),
+            "include_privacy_policy": include_privacy_policy,
+            "viewed[]": viewed,
+        }
+
+        response = await self.client.get(
+            url_path, params=self._build_params(params, **kwargs)
+        )
+        data = response.raise_for_data_and_status().json()
+        return IllustRecommendedResult.model_validate(data)
