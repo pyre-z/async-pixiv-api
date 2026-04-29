@@ -1,8 +1,8 @@
 from datetime import date
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterator
 
-from pydantic import EmailStr, Field, field_validator
+from pydantic import EmailStr, field_validator
 from yarl import URL
 
 from pixiv.app.model.base import PixivBaseModel
@@ -138,8 +138,10 @@ class UserPreview(PixivBaseModel):
 
 
 class UserSearchResult(PageResult[UserPreview]):
-    previews: list[UserPreview] = Field(alias="user_previews")
-    next_url: URL | None
+    user_previews: list[UserPreview]
+
+    def __iter__(self) -> Iterator[UserPreview]:
+        return iter(self.user_previews)
 
 
 class UserRecommendedResult(UserSearchResult):

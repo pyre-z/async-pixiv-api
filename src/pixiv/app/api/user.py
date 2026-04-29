@@ -3,9 +3,9 @@ from typing import TYPE_CHECKING, Iterable, cast
 
 from pixiv.app.api.base import PixivAPIBase
 from pixiv.app.model import (
-    SearchDurationParam,
-    SearchSortParam,
-    SearchTargetParam,
+    Duration,
+    Sort,
+    Target,
     UserSearchResult,
 )
 
@@ -17,46 +17,8 @@ __all__ = ("PixivUserAPI",)
 
 class PixivUserAPI(PixivAPIBase):
     async def search(
-        self,
-        word: str | Iterable[str],
-        sort: SearchSortParam | None = None,
-        duration: SearchDurationParam | None = None,
-        target: SearchTargetParam | None = None,
-        start_date: datetime.date | None = None,
-        end_date: datetime.date | None = None,
-        offset: int | None = None,
-        **kwargs,
+        self, word: str | Iterable[str], offset: int | None = None, **kwargs
     ) -> UserSearchResult:
-        today = datetime.date.today()
-        match duration:
-            case SearchDurationParam.WithinLastDay:
-                start_date = today - datetime.timedelta(days=1)
-                end_date = today
-            case SearchDurationParam.WithinLastWeek:
-                start_date = today - datetime.timedelta(days=7)
-                end_date = today
-            case SearchDurationParam.WithinLastMonth:
-                start_date = today - datetime.timedelta(days=30)
-                end_date = today
-            case SearchDurationParam.WithinLastYear:
-                start_date = today - datetime.timedelta(days=365)
-                end_date = today
-        start_date_param = end_date_param = None
-        if end_date is not None:
-            end_date_param = end_date.strftime("%Y-%m-%d")
-        if start_date is not None:
-            start_date_param = start_date.strftime("%Y-%m-%d")
-            end_date_param = end_date_param or today.strftime("%Y-%m-%d")
-
         return cast(
-            UserSearchResult,
-            await super().search(
-                word,
-                sort=sort,
-                target=target,
-                start_date=start_date_param,
-                end_date=end_date_param,
-                offset=offset,
-                **kwargs,
-            ),
+            UserSearchResult, await super().search(word, offset=offset, **kwargs)
         )

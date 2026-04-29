@@ -1,11 +1,12 @@
 import datetime
-from enum import StrEnum
-from typing import TYPE_CHECKING
+from enum import IntEnum, StrEnum
+from typing import TYPE_CHECKING, Iterator
 
+from pydantic import Field
 from yarl import URL
 
-from pixiv.app.model import PixivBaseModel
-from pixiv.app.model.other import Request, Tag
+from pixiv.app.model.base import PixivBaseModel
+from pixiv.app.model.other import PageResult, Request, Tag
 
 if TYPE_CHECKING:
     from pixiv.app.model import User
@@ -15,6 +16,17 @@ class IllustType(StrEnum):
     Illust = "illust"
     Manga = "manga"
     Ugoira = "ugoira"
+
+
+class IllustAIType(IntEnum):
+    Non = 0
+    """原创"""
+
+    Original = 1
+    """原创手绘"""
+
+    AIGenerated = 2
+    """AI生成"""
 
 
 class IllustImageUrls(PixivBaseModel):
@@ -66,12 +78,33 @@ class Illust(PixivBaseModel):
     is_muted: bool
     seasonal_effect_animation_urls: None
     event_banners: URL | None
-    illust_ai_type: int
+    illust_ai_type: IllustAIType
     illust_book_style: int
     request: Request | None
     restriction_attributes: list[str] | None = None
     comment_access_control: int = 0
 
+    @property
+    def link(self) -> URL:
+        return URL(f"https://www.pixiv.net/artworks/{self.id}")
+
 
 class IllustDetail(PixivBaseModel):
     illust: Illust
+
+
+class IllustSearchResult(PageResult[Illust]):
+    illusts: list[Illust]
+
+    def __iter__(self) -> Iterator[Illust]:
+        yield from self.illusts
+
+
+class IllustPrivacyPolicy(PixivBaseModel):
+    pass
+
+
+class IllustRecommendedResult(IllustSearchResult):
+    ranking_illusts: list[Illust]
+    contest_exists: bool
+    privacy_policy: IllustPrivacyPolicy

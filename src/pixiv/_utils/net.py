@@ -91,7 +91,9 @@ class AsyncHTTPTransport(DefaultAsyncHTTPTransport):
                 if retry_times < 2:
                     break
                 logger.warning(
-                    f"Retry {count} times failed, sleep {retry_sleep_time}s, error: {e}"
+                    f"Retry {count} times failed, "
+                    f"sleep {retry_sleep_time}s, "
+                    f"error({type(error).__name__}): {str(error) or '""'}"
                 )
                 await asyncio.sleep(retry_sleep_time)
         raise error or RuntimeError(f"Retry {count} times failed.")
@@ -320,7 +322,7 @@ class ClientResponse(Response):
     @lru_cache(maxsize=4)
     def json(self, **kwargs: Any) -> Any:
         """Parse response body as JSON, using ujson if available."""
-        return json.loads(self.text, **kwargs)
+        return json.loads(self.text, **kwargs)  # ty:ignore[unresolved-attribute]
 
     def raise_for_status(self) -> Self:
         request = self._request
@@ -361,6 +363,9 @@ class ClientResponse(Response):
         if response_data.get("error", {}):
             raise PixivError(response_data["error"]["message"])
         return self
+
+    def raise_for_data_and_status(self) -> Self:
+        return self.raise_for_data().raise_for_status()
 
 
 class PixivRequestClient(AsyncClient):

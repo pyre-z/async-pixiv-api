@@ -25,20 +25,15 @@ class PixivAPIPath(TypedDict):
 
 @lru_cache
 def _parse_value(value):
-    match value:
-        case Enum():
-            return _parse_value(value.value)
-        case _:
-            return str(value)
-
-
-def _build_params(**kwargs) -> dict[str, Any]:
-    params = {}
-    for name, value in kwargs.items():
-        if value is None:
-            continue
-        params[name] = _parse_value(value)
-    return params
+    if isinstance(value, Enum):
+        return _parse_value(value.value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    if hasattr(value, "__iter__"):
+        return " ".join(map(_parse_value, value))
+    return str(value)
 
 
 def need_auth[**P, R](method: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
@@ -76,34 +71,42 @@ class AbstractPixivAPIBase[ClientType: "PixivClient"](ABC):
             self.client.__class__.__module__.replace("client", "model")
         )
 
+    @staticmethod
+    def _build_params(**kwargs) -> dict[str, Any]:
+        params = {}
+        for name, value in kwargs.items():
+            if value is None:
+                continue
+            params[name] = _parse_value(value)
+        return params
+
     async def detail(self, id: int | str) -> "PixivBaseModel":
         url_path = self.API_PATH["detail"].format(id=id, type=self.type)
         response = await self.client.get(url_path)
-        data = response.raise_for_status().raise_for_data().json()
-        detail_cls: type["PixivBaseModel"] = getattr(
+        data = response.raise_for_data_and_status().json()
+        cls: type["PixivBaseModel"] = getattr(
             self._model_module(), f"{self.type.title()}Detail"
         )
-        return detail_cls.model_validate(data)
+        return cls.model_validate(data)
 
-    @need_auth
     async def search(self, word: str | Iterable[str], **kwargs) -> "PixivBaseModel":
         word = word if isinstance(word, str) else " ".join(word)
         url_path = self.API_PATH["search"].format(type=self.type)
         response = await self.client.get(
-            url_path, params=_build_params(word=word, **kwargs)
+            url_path, params=self._build_params(word=word, **kwargs)
         )
-        data = response.raise_for_status().raise_for_data().json()
-        detail_cls: type["PixivBaseModel"] = getattr(
+        data = response.raise_for_data_and_status().json()
+        cls: type["PixivBaseModel"] = getattr(
             self._model_module(), f"{self.type.title()}SearchResult"
         )
-        return detail_cls.model_validate(data)
+        return cls.model_validate(data)
 
     @need_auth
     async def recommended(self, **kwargs) -> "PixivBaseModel":
         url_path = self.API_PATH["recommended"].format(type=self.type)
-        response = await self.client.get(url_path, params=_build_params(**kwargs))
-        data = response.raise_for_status().raise_for_data().json()
-        detail_cls: type["PixivBaseModel"] = getattr(
+        response = await self.client.get(url_path, params=self._build_params(**kwargs))
+        data = response.raise_for_data_and_status().json()
+        cls: type["PixivBaseModel"] = getattr(
             self._model_module(), f"{self.type.title()}RecommendedResult"
         )
-        return detail_cls.model_validate(data)
+        return cls.model_validate(data)
